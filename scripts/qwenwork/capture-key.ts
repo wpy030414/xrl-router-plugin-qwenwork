@@ -7,7 +7,7 @@
  *  2. 强制刷新（deviceToken/refresh）→ 验证刷新链 + 轮换 refresh token
  *  3. 备份新 refresh token 到 .env 的 QWEN_KEYS（auth-v2.dat 损坏时可作灾备）
  *
- * 对应 pnpm capture-key（qwenwork 通道）；pnpm capture-key:wukong 走悟空脚本。
+ * 对应 pnpm capture-key / pnpm login。
  */
 
 import { execSync } from 'node:child_process';

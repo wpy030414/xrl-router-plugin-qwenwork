@@ -2,7 +2,6 @@ import dotenv from 'dotenv';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { CHANNEL, type Channel } from './channel';
 
 dotenv.config();
 
@@ -28,40 +27,9 @@ function detectQwenUserDataDir(): string {
   return path.join(os.homedir(), 'Library', 'Application Support', 'QwenWorkCN');
 }
 
-/** 动态获取 Wukong 客户端版本号（从安装目录名推断，不再硬编码） */
-function detectWukongClientVersion(): string {
-  const envVal = process.env.DEAP_WUKONG_CLIENT_VERSION;
-  if (envVal) return envVal;
-
-  // Windows: 从 C:\Program Files\Wukong\<version>\ 目录名推断
-  if (process.platform === 'win32') {
-    const wukongDir = 'C:\\Program Files\\Wukong';
-    try {
-      const versions = fs.readdirSync(wukongDir).filter(d => /^\d+\.\d+\.\d+-.+$/.test(d));
-      versions.sort((a, b) => b.localeCompare(a));
-      if (versions.length > 0) return versions[0];
-    } catch { /* 目录不存在 */ }
-  }
-
-  // 兜底：已知可用版本
-  return '0.9.65-26061702';
-}
-
 export interface Settings {
   port: number;
   availableModels: string[];
-  channel: Channel;
-
-  // —— wukong 通道（DEAP）——
-  deapBaseUrl: string;
-  deapUserType: string;
-  deapScenarioCode: string;
-  deapProductCode: string;
-  deapAbilityCode: string;
-  deapWukongClientVersion: string;
-  deapWukongDeviceType: string;
-  deapAgentLoopVersion: string;
-  deapBizParam: string;
 
   // —— qwenwork 通道（gateway.qwenwork.cn / 智谱 GLM）——
   qwenBaseUrl: string;              // 推理网关 base
@@ -78,41 +46,26 @@ export interface Settings {
   xrlRouterUrl: string;
 }
 
-/** 按通道读 env 键（qwenwork 读 QWEN_*，wukong 读 DEAP_*，跨通道通用读 * 无前缀） */
+/** 按通道读 env 键（qwenwork 读 QWEN_*，跨通道通用读 * 无前缀） */
 function env(key: string, fallback: string): string {
   const v = process.env[key];
   return v !== undefined && v !== '' ? v : fallback;
 }
 
 /**
- * 解析监听端口：两通道默认端口不同（qwenwork 19067 / wukong 19066），可分别同时启动喵。
- * 各通道只读专用键（QWEN_PORT / WUKONG_PORT），不再支持共用 PORT——避免两通道取到同一端口冲突喵。
+ * 解析监听端口：默认端口 19067，可分别同时启动。
+ * 各通道只读专用键（QWEN_PORT），不再支持共用 PORT——避免两通道取到同一端口冲突喵。
  */
 function resolvePort(): number {
-  const key = CHANNEL === 'wukong' ? 'WUKONG_PORT' : 'QWEN_PORT';
-  return parseInt(env(key, CHANNEL === 'wukong' ? '19066' : '19067'), 10);
+  return parseInt(env('QWEN_PORT', '19067'), 10);
 }
 
 export const settings: Settings = {
   port: resolvePort(),
-  availableModels: (process.env.AVAILABLE_MODELS || (CHANNEL === 'qwenwork'
-    ? 'qwork-advanced,qwork-auto,qwork-lite,qmodel_latest'
-    : 'qwen3.7-max,qwen3.7-plus'))
+  availableModels: (process.env.AVAILABLE_MODELS || 'qwork-advanced,qwork-auto,qwork-lite,qmodel_latest')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean),
-  channel: CHANNEL,
-
-  // —— wukong 通道（原默认值）——
-  deapBaseUrl: env('DEAP_BASE_URL', 'https://api-deap.dingtalk.com/dingtalk/v1'),
-  deapUserType: env('DEAP_USER_TYPE', 'vip'),
-  deapScenarioCode: env('DEAP_SCENARIO_CODE', 'com.dingtalk.scenario.wukong'),
-  deapProductCode: env('DEAP_PRODUCT_CODE', 'AI_WUKONG'),
-  deapAbilityCode: env('DEAP_ABILITY_CODE', 'M_AI_WUKONG'),
-  deapWukongClientVersion: detectWukongClientVersion(),
-  deapWukongDeviceType: env('DEAP_WUKONG_DEVICE_TYPE', '2'),
-  deapAgentLoopVersion: env('DEAP_AGENT_LOOP_VERSION', 'V2'),
-  deapBizParam: env('DEAP_BIZ_PARAM', '{"taskDes":"5L2g5aW9"}'),
 
   // —— qwenwork 通道 ——
   qwenBaseUrl: env('QWEN_BASE_URL', 'https://gateway.qwenwork.cn'),

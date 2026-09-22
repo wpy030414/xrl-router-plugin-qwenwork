@@ -1,62 +1,30 @@
 /**
- * PluginClient — 连接 xrl-router 的 WebSocket 客户端。
+ * PluginClient — 连接 xrl-router 的 WebSocket 客户端（V24 契约）。
  *
  * 功能：
- * - 启动时连接 xrl-router 并注册为插件
+ * - 启动时连接 xrl-router 并注册为插件（不带 keys，V24 起 Router 不再管理密钥）
  * - 每 30s 发送心跳保持连接
- * - 每 5s 轮询 .env 文件，检测密钥变化并推送给 xrl-router
  * - 断线自动重连（指数退避，最大间隔 60s）
+ * - 容忍 Router 未就绪：WS 连接失败时退避重试
  */
 
 import { WebSocket } from 'ws';
-import fs from 'node:fs';
-import path from 'node:path';
-import dotenv from 'dotenv';
 import { settings } from './config';
-import { isQwenwork, PLUGIN_ID } from './channel';
 import { displayName as qwenDisplayName } from './qwenwork/client';
 
-const ENV_POLL_INTERVAL_MS = 5000;
+const PLUGIN_ID = 'plugin-qwenwork';
 const HEARTBEAT_INTERVAL_MS = 30000;
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 60000;
 
-/** 密钥池环境变量键（qwenwork 用 QWEN_KEYS，wukong 用 WUKONG_KEYS） */
-const KEYS_ENV_KEY = isQwenwork() ? 'QWEN_KEYS' : 'WUKONG_KEYS';
-
 export class PluginClient {
   private ws: WebSocket | null = null;
   private heartbeatTimer: NodeJS.Timeout | null = null;
-  private envPollTimer: NodeJS.Timeout | null = null;
   private reconnectAttempts = 0;
   private reconnectTimer: NodeJS.Timeout | null = null;
-  private lastKeys: string[] = [];
-  private connected = false;
 
   constructor() {
-    this.loadCurrentKeys();
     this.connect();
-    this.startEnvPolling();
-  }
-
-  /**
-   * 加载当前 .env 中的密钥列表
-   */
-  private loadCurrentKeys(): void {
-    try {
-      const envPath = path.resolve(process.cwd(), '.env');
-      if (fs.existsSync(envPath)) {
-        const envContent = fs.readFileSync(envPath, 'utf-8');
-        const parsed = dotenv.parse(envContent);
-        const keysStr = parsed[KEYS_ENV_KEY] || '';
-        this.lastKeys = keysStr
-          .split(',')
-          .map(s => s.trim())
-          .filter(Boolean);
-      }
-    } catch {
-      // .env 加载失败时保持 lastKeys 为空
-    }
   }
 
   /**
@@ -68,7 +36,6 @@ export class PluginClient {
 
     this.ws.on('open', () => {
       console.log('[PluginClient] Connected to xrl-router');
-      this.connected = true;
       this.reconnectAttempts = 0;
       this.sendRegister();
       this.startHeartbeat();
@@ -80,7 +47,6 @@ export class PluginClient {
 
     this.ws.on('close', () => {
       console.log('[PluginClient] Disconnected from xrl-router');
-      this.connected = false;
       this.stopHeartbeat();
       this.scheduleReconnect();
     });
@@ -91,12 +57,12 @@ export class PluginClient {
   }
 
   /**
-   * 发送注册消息
+   * 发送注册消息（V24 契约：无 keys，kind=chat_completions，带 workdir）
    */
   private sendRegister(): void {
     const models = settings.availableModels.map(id => ({
       model_id: id,
-      display_name: isQwenwork() ? qwenDisplayName(id) : id,
+      display_name: qwenDisplayName(id),
       tier: 'custom',
     }));
 
@@ -104,12 +70,12 @@ export class PluginClient {
       type: 'register',
       plugin_id: PLUGIN_ID,
       provider: {
-        kind: 'openai',
+        kind: 'chat_completions',
         base_url: `http://localhost:${settings.port}`,
         api_path: '/v1/chat/completions',
       },
       models,
-      keys: this.lastKeys,
+      workdir: process.cwd(),
     };
 
     this.send(message);
@@ -118,8 +84,16 @@ export class PluginClient {
   /**
    * 处理 xrl-router 返回的消息
    */
-  private handleMessage(_data: string): void {
-    // xrl-router 消息静默处理（registered/reconnected/keys_ack/activated 均无需动作）
+  private handleMessage(data: string): void {
+    try {
+      const msg = JSON.parse(data);
+      if (msg.type === 'error') {
+        console.error(`[PluginClient] Router error: ${msg.reason}`);
+      }
+      // registered / reconnected / deleted 均无需额外动作
+    } catch {
+      // 无法解析的消息静默忽略
+    }
   }
 
   /**
@@ -132,12 +106,12 @@ export class PluginClient {
   }
 
   /**
-   * 启动心跳
+   * 启动心跳（V24：不带 timestamp）
    */
   private startHeartbeat(): void {
     this.stopHeartbeat();
     this.heartbeatTimer = setInterval(() => {
-      this.send({ type: 'heartbeat', timestamp: Date.now() });
+      this.send({ type: 'heartbeat' });
     }, HEARTBEAT_INTERVAL_MS);
   }
 
@@ -152,7 +126,7 @@ export class PluginClient {
   }
 
   /**
-   * 计划重连
+   * 计划重连（指数退避，容忍 Router 未就绪）
    */
   private scheduleReconnect(): void {
     if (this.reconnectTimer) return;
@@ -171,59 +145,10 @@ export class PluginClient {
   }
 
   /**
-   * 启动 .env 轮询
-   */
-  private startEnvPolling(): void {
-    this.envPollTimer = setInterval(() => {
-      this.checkEnvChanges();
-    }, ENV_POLL_INTERVAL_MS);
-  }
-
-  /**
-   * 检查 .env 变化
-   */
-  private checkEnvChanges(): void {
-    try {
-      const envPath = path.resolve(process.cwd(), '.env');
-      if (!fs.existsSync(envPath)) return;
-
-      const envContent = fs.readFileSync(envPath, 'utf-8');
-      const parsed = dotenv.parse(envContent);
-      const keysStr = parsed[KEYS_ENV_KEY] || '';
-      const currentKeys = keysStr
-        .split(',')
-        .map(s => s.trim())
-        .filter(Boolean);
-
-      // 比较密钥列表是否变化
-      const changed =
-        currentKeys.length !== this.lastKeys.length ||
-        currentKeys.some((k, i) => k !== this.lastKeys[i]);
-
-      if (changed) {
-        this.lastKeys = currentKeys;
-
-        if (this.connected) {
-          this.send({
-            type: 'keys_update',
-            keys: currentKeys,
-          });
-        }
-      }
-    } catch {
-      // .env 检查失败时静默忽略
-    }
-  }
-
-  /**
    * 关闭客户端
    */
   public close(): void {
     this.stopHeartbeat();
-    if (this.envPollTimer) {
-      clearInterval(this.envPollTimer);
-      this.envPollTimer = null;
-    }
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;

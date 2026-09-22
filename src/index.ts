@@ -1,27 +1,145 @@
 /**
- * 双通道插件入口（共享骨架）：
- *   无后缀（pnpm serve）        = qwenwork 通道（src/qwenwork/：千问办公 → gateway.qwenwork.cn → 智谱 GLM）
- *   --wukong（pnpm serve:wukong）= wukong 通道（src/wukong/：钉钉悟空 → api-deap.dingtalk.com）
+ * qwenwork 插件入口（V24 契约）：
+ *   Hono 网关 + WebSocket 插件注册（connect ws://127.0.0.1:19068/ws/plugin）。
  *
- * 共享：Express 骨架 / 健康检查 / 端口释放 / WS 插件注册 / 密钥池推送。
- * 通道差异封装在 src/<channel>/ 两个目录，各自含 client（转发）与专用逻辑。
+ * 职责：
+ * - HTTP 网关：OpenAI Chat Completions 兼容（POST /v1/chat/completions）
+ * - WS 插件：注册 / 心跳 / 重连（V24 契约：无 keys）
+ * - 幂等：若已有实例在监听（端口占用），干净退出
+ * - 容忍 Router 未就绪：WS 连接失败时退避重试
  */
 
-import express, { Request, Response, Express } from 'express';
-import cors from 'cors';
+import { Hono } from 'hono';
+import { cors } from 'hono/cors';
+import { serve } from '@hono/node-server';
 import { spawn } from 'child_process';
 import { settings } from './config';
 import { PluginClient } from './pluginClient';
-import { CHANNEL, isQwenwork, PLUGIN_ID } from './channel';
-import { forwardChatCompletions as forwardQwenChat } from './qwenwork/client';
-import { forwardChatCompletions as forwardWukongChat } from './wukong/client';
+import { forwardChatCompletions } from './qwenwork/client';
 import { initTokenManager } from './qwenwork/auth';
 
-const app: Express = express();
+const PLUGIN_ID = 'plugin-qwenwork';
+
+const app = new Hono();
 
 // 中间件
-app.use(cors());
-app.use(express.json({ limit: '50mb' }));
+app.use('*', cors());
+
+// ============================================================================
+// 路由
+// ============================================================================
+
+// 根路径（健康探针）
+app.get('/', (c) => {
+  return c.json({
+    version: '0.2.0',
+    service: PLUGIN_ID,
+    status: 'running',
+    mode: 'plugin',
+    backend: 'qwenwork',
+    endpoints: { chat: '/v1/chat/completions', health: '/health' },
+  });
+});
+
+// 健康检查
+app.get('/health', (c) => {
+  return c.json({
+    status: 'healthy',
+    backend: 'qwenwork',
+    plugin_mode: true,
+    base_url: settings.qwenBaseUrl,
+  });
+});
+
+// OpenAI Chat Completions → qwenwork 转发
+app.post('/v1/chat/completions', async (c) => {
+  const body = await c.req.json();
+  const authHeader = c.req.header('authorization');
+
+  // Hono 的 res 不直接暴露 Node.js ServerResponse，需要用 stream 方式处理 SSE
+  // 使用 c.body() 配合 ReadableStream 或直接用 c.res
+  return new Promise<Response>((resolve) => {
+    // 构造一个仿 Response 写入器，桥接 Hono 和 qwenwork/client 的 res.write/res.end 模式
+    const chunks: (string | Buffer)[] = [];
+    let statusCode = 200;
+    const headers = new Map<string, string>();
+    let headersSent = false;
+    let ended = false;
+
+    const mockRes: any = {
+      writableEnded: false,
+      headersSent: false,
+      socket: null,
+      on(event: string, _cb: () => void) {
+        // Hono 场景下 close 事件由 AbortController 处理
+        if (event === 'close') {
+          // 暂存，后续由 abort 触发
+        }
+      },
+      removeListener(_event: string, _cb: () => void) {},
+      status(code: number) {
+        statusCode = code;
+        return mockRes;
+      },
+      setHeader(name: string, value: string) {
+        headers.set(name.toLowerCase(), value);
+      },
+      type(contentType: string) {
+        headers.set('content-type', contentType);
+        return mockRes;
+      },
+      json(data: any) {
+        if (ended) return;
+        headers.set('content-type', 'application/json');
+        const body = JSON.stringify(data);
+        headersSent = true;
+        mockRes.headersSent = true;
+        ended = true;
+        mockRes.writableEnded = true;
+        resolve(new Response(body, {
+          status: statusCode,
+          headers: Object.fromEntries(headers),
+        }));
+      },
+      send(data: string) {
+        if (ended) return;
+        headersSent = true;
+        mockRes.headersSent = true;
+        ended = true;
+        mockRes.writableEnded = true;
+        resolve(new Response(data, {
+          status: statusCode,
+          headers: Object.fromEntries(headers),
+        }));
+      },
+      write(chunk: string | Buffer) {
+        if (ended) return;
+        chunks.push(chunk);
+      },
+      end() {
+        if (ended) return;
+        headersSent = true;
+        mockRes.headersSent = true;
+        ended = true;
+        mockRes.writableEnded = true;
+        const bodyStr = chunks.join('');
+        resolve(new Response(bodyStr, {
+          status: statusCode,
+          headers: Object.fromEntries(headers),
+        }));
+      },
+      flush() {
+        // no-op for Hono (no Express compression middleware)
+      },
+    };
+
+    forwardChatCompletions(body, mockRes, authHeader);
+  });
+});
+
+// ============================================================================
+// 端口释放
+// ============================================================================
 
 /**
  * 检测并释放指定端口（跨平台支持）
@@ -68,59 +186,24 @@ async function killPortProcess(port: number): Promise<void> {
 }
 
 // ============================================================================
-// 路由
-// ============================================================================
-
-// 根路径（健康探针）
-app.get('/', (_req: Request, res: Response) => {
-  res.json({
-    version: '0.1.0',
-    service: PLUGIN_ID,
-    status: 'running',
-    mode: 'plugin',
-    channel: CHANNEL,
-    backend: CHANNEL === 'wukong' ? 'deap' : 'qwenwork',
-    endpoints: { chat: '/v1/chat/completions', health: '/health' },
-  });
-});
-
-// 健康检查
-app.get('/health', (_req: Request, res: Response) => {
-  res.json({
-    status: 'healthy',
-    channel: CHANNEL,
-    backend: CHANNEL === 'wukong' ? 'deap' : 'qwenwork',
-    plugin_mode: true,
-    base_url: CHANNEL === 'wukong' ? settings.deapBaseUrl : settings.qwenBaseUrl,
-  });
-});
-
-// OpenAI Chat Completions（按通道分发到各自 client）
-app.post('/v1/chat/completions', async (req: Request, res: Response) => {
-  if (isQwenwork()) {
-    // qwenwork：Authorization 透传密钥池的 refresh token（QWEN_KEYS），网关正确使用
-    await forwardQwenChat(req.body, res, req.headers.authorization);
-  } else {
-    await forwardWukongChat(req, res);
-  }
-});
-
-// ============================================================================
 // 启动
 // ============================================================================
 
 async function startServer() {
   const port = settings.port;
-  const host = '0.0.0.0';
 
-  // qwenwork 通道：启动 token 管理器（auth-v2.dat 文件监听 + 自动拾取）
-  if (isQwenwork()) {
-    initTokenManager();
-  }
+  // 启动 token 管理器（auth-v2.dat 文件监听 + 自动拾取）
+  initTokenManager();
 
   await killPortProcess(port);
-  app.listen(port, host, () => {
-    console.log(`[${CHANNEL}] listening on http://localhost:${port} (pid ${process.pid})`);
+
+  serve({
+    fetch: app.fetch,
+    port,
+    hostname: '0.0.0.0',
+  }, (info) => {
+    console.log(`[qwenwork] listening on http://localhost:${info.port} (pid ${process.pid})`);
+
     // 启动 PluginClient（自动连接 xrl-router 并注册）
     const pluginClient = new PluginClient();
 

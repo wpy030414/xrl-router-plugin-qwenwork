@@ -1,22 +1,19 @@
 {
   "version": "0.1.0",
   "name": "xrl-router-plugin-qwenwork",
-  "description": "xrl-router 双通道插件：qwenwork（千问办公→智谱GLM）与 wukong（钉钉悟空→DEAP），包装为 OpenAI 兼容本地服务",
+  "description": "xrl-router qwenwork 插件：gateway.qwenwork.cn → 智谱 GLM / Qwen3.7-plus / DeepSeek-V4-flash / Qwen3.8-max，包装为 OpenAI 兼容本地服务",
   "scripts": {
+    "login": "tsx scripts/qwenwork/capture-key.ts",
     "capture-key": "tsx scripts/qwenwork/capture-key.ts",
-    "serve": "tsx src/index.ts",
-    "capture-key:wukong": "tsx scripts/wukong/capture-key.ts",
-    "serve:wukong": "tsx src/index.ts --use wukong"
+    "serve": "tsx src/index.ts"
   },
   "dependencies": {
-    "cors": "^2.8.5",
+    "@hono/node-server": "^1.13.8",
     "dotenv": "^16.3.1",
-    "express": "^4.18.2",
+    "hono": "^4.7.4",
     "ws": "^8.16.0"
   },
   "devDependencies": {
-    "@types/cors": "^2.8.17",
-    "@types/express": "^4.17.21",
     "@types/node": "^20.10.0",
     "@types/ws": "^8.5.10",
     "tsx": "^4.6.2",
