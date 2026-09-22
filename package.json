@@ -3,7 +3,7 @@
   "name": "xrl-router-plugin-qwenwork",
   "description": "xrl-router qwenwork 插件：gateway.qwenwork.cn → 智谱 GLM / Qwen3.7-plus / DeepSeek-V4-flash / Qwen3.8-max，包装为 OpenAI 兼容本地服务",
   "scripts": {
-    "login": "tsx scripts/qwenwork/capture-key.ts",
+    "login": "tsx src/qwenwork/login.ts",
     "capture-key": "tsx scripts/qwenwork/capture-key.ts",
     "serve": "tsx src/index.ts"
   },

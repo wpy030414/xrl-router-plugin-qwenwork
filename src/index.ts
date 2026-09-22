@@ -15,7 +15,7 @@ import { serve } from '@hono/node-server';
 import { spawn } from 'child_process';
 import { settings } from './config';
 import { PluginClient } from './pluginClient';
-import { forwardChatCompletions } from './qwenwork/client';
+import { forwardChatCompletions, getAvailableModelList } from './qwenwork/client';
 import { initTokenManager } from './qwenwork/auth';
 
 const PLUGIN_ID = 'plugin-qwenwork';
@@ -48,6 +48,29 @@ app.get('/health', (c) => {
     backend: 'qwenwork',
     plugin_mode: true,
     base_url: settings.qwenBaseUrl,
+  });
+});
+
+// OpenAI /v1/models 兼容端点
+// 逆向发现：模型列表由服务端动态管理（120s 缓存），客户端只发 x-model-key
+// 插件侧暴露静态模型列表 + 别名映射，让上层（xrl-router）知道可用模型
+app.get('/v1/models', (c) => {
+  const models = getAvailableModelList().map((m) => ({
+    id: m.id,
+    object: 'model',
+    created: Math.floor(Date.now() / 1000),
+    owned_by: 'qwenwork',
+    permission: [],
+    root: m.id,
+    parent: null,
+    // OpenAI 非标准字段，给 xrl-router 用
+    display_name: m.name,
+    aliases: m.aliases,
+  }));
+
+  return c.json({
+    object: 'list',
+    data: models,
   });
 });
 

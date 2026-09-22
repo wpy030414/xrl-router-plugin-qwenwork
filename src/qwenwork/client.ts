@@ -14,13 +14,55 @@ import { settings } from '../config';
 import { getToken, refreshDeviceToken } from './auth';
 import { buildSignMaterial, buildAuthHeaders } from './signer';
 
-/** qwenwork 应用层模型 → 展示名（注册时给 xrl-router 展示用） */
+/**
+ * qwenwork 应用层模型 → 展示名（注册时给 xrl-router 展示用）。
+ *
+ * 逆向发现（v1.2.0 asar）：
+ * - 客户端通过 Qoder CLI SDK `getAvailableModels()` 从服务端动态拉取模型列表（120s 缓存）
+ * - 客户端只发 `x-model-key` header，**服务端做负载均衡和轮换**
+ * - 默认模型 = `qwork-advanced`（constants$3.D）
+ * - 模型列表通过 `resolveLegacyStandardModelKey()` 解析别名：
+ *   "qwork-auto" / "auto" / "flash" → 映射到实际模型 key
+ */
 const DISPLAY_NAMES: Record<string, string> = {
   'qwork-advanced': 'glm-5.2',
   'qwork-auto': 'qwen3.7-plus',
   'qwork-lite': 'deepseek-v4-flash',
   'qmodel_latest': 'qwen3.8-max',
 };
+
+/** 模型别名 → 标准 key（逆向自 resolveLegacyStandardModelKey） */
+const MODEL_ALIASES: Record<string, string> = {
+  'auto': 'qwork-auto',
+  'flash': 'qwork-lite',
+  'advanced': 'qwork-advanced',
+  'glm': 'qwork-advanced',
+  'qwen': 'qwork-auto',
+  'deepseek': 'qwork-lite',
+};
+
+/** 解析模型 key（支持别名 + 展示名反查） */
+export function resolveModelKey(input: string): string {
+  // 直接命中
+  if (DISPLAY_NAMES[input] || input.startsWith('qwork-') || input.startsWith('qmodel')) return input;
+  // 别名
+  if (MODEL_ALIASES[input]) return MODEL_ALIASES[input];
+  // 展示名反查
+  for (const [key, display] of Object.entries(DISPLAY_NAMES)) {
+    if (display === input) return key;
+  }
+  return input; // 原样透传，让服务端决定
+}
+
+/** 获取所有可用模型（含别名），给 /v1/models 用 */
+export function getAvailableModelList(): Array<{ id: string; name: string; aliases: string[] }> {
+  return Object.entries(DISPLAY_NAMES).map(([id, name]) => {
+    const aliases = Object.entries(MODEL_ALIASES)
+      .filter(([, v]) => v === id)
+      .map(([k]) => k);
+    return { id, name, aliases };
+  });
+}
 
 export function displayName(modelId: string): string {
   return DISPLAY_NAMES[modelId] || modelId;
@@ -74,7 +116,9 @@ export async function forwardChatCompletions(
   res: any,
   authHeader?: string,
 ): Promise<void> {
-  const model = body.model || 'qwork-advanced';
+  // 解析模型别名（如 "auto" → "qwork-auto", "glm" → "qwork-advanced"）
+  const rawModel = body.model || 'qwork-advanced';
+  const model = resolveModelKey(rawModel);
   const isStream = body.stream === true;
 
   // 客户端断开时取消上游请求，避免无谓消耗 + 写已关闭的 res
