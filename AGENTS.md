@@ -4,14 +4,11 @@
 
 ## 项目定义
 
-`xrl-router-plugin-qwenwork` 是一个**双通道 xrl-router 插件**，将中国 AI 网关包装为 OpenAI Chat Completions 兼容的本地服务喵～
+`xrl-router-plugin-qwenwork` 是一个 **qwenwork 通道的 xrl-router 插件**，将中国 AI 网关包装为 OpenAI Chat Completions 兼容的本地服务喵～
 
-两个通道：
-
-| 通道 | 选择方式 | 上游网关 | 后端模型 |
-|------|---------|---------|---------|
-| qwenwork（默认） | 不加参数 | `gateway.qwenwork.cn` | 智谱 GLM-5.2 / Qwen3.7-plus / DeepSeek-V4-flash / Qwen3.8-max |
-| wukong | `--use wukong` | `api-deap.dingtalk.com` | Qwen3.7-max / Qwen3.7-plus |
+| 上游网关 | 后端模型 |
+|---------|---------|
+| `gateway.qwenwork.cn` | 智谱 GLM-5.2 / Qwen3.7-plus / DeepSeek-V4-flash / Qwen3.8-max |
 
 协议边界：**只桥接 OpenAI Chat Completions（`/v1/chat/completions`）**，不做任何协议扩展喵。
 
@@ -23,10 +20,7 @@
 - **不做密钥轮转 / 重试逻辑** — 这是 xrl-router 的职责，插件只管转发
 - **不做本地模型推理** — 所有请求都走远端网关，插件是纯翻译层
 - **不实现 `/v1/models` 端点** — 模型列表通过 WebSocket 注册推送，不通过 HTTP 暴露
-- **不对 wukong 做 SSE 解析** — 按行拆分 + 逐行 flush 即可，不要尝试解包 SSE data 字段
-- **~~qwenwork serve 不自己读 `auth-v2.dat`~~**（已推翻）— serve 通过 `getToken()` 三源 fallback 读取 auth-v2.dat，详见 D-3
-- **~~永不写回 `auth-v2.dat`~~**（已推翻）— refresh 成功后 `encryptAuthFile()` 写回，双向同步避免轮换互踩，详见 D-8
-- **永不复用抓到的 JWT / cosy-key** — 网关有 anti-replay 检测，复用会被封
+- **不复用抓到的 JWT / cosy-key** — 网关有 anti-replay 检测，复用会被封
 - **不做 tools / tool_use 翻译** — xrl-router 自己处理
 - **不实现非 Chat Completions 端点** — `/v1/embeddings`、`/v1/completions` 等一律不加
 
@@ -34,74 +28,68 @@
 
 ```
 src/
-├── index.ts          # Express 入口：路由、端口释放、通道分发、启动
+├── index.ts          # Hono 入口：路由、端口释放、启动
 ├── config.ts         # Settings 单例：集中读取环境变量
-├── channel.ts        # 通道判定：--use wukong → wukong，else qwenwork
-├── pluginClient.ts   # WebSocket 客户端：注册、心跳、密钥推送、重连
-├── qwenwork/
-│   ├── client.ts     # 转发到 gateway.qwenwork.cn（签名 + SSE 解包）
-│   ├── auth.ts       # OAuth token 管理（safeStorage 解密 + 刷新）
-│   └── signer.ts     # RSA_PKCS1 + AES 签名（逆向自 asar）
-└── wukong/
-    └── client.ts     # 转发到 api-deap.dingtalk.com（DEAP 头注入 + 按行 flush）
+├── pluginClient.ts   # WebSocket 客户端：注册（V24 无 keys）、心跳、重连
+└── qwenwork/
+    ├── client.ts     # 转发到 gateway.qwenwork.cn（签名 + SSE 解包）
+    ├── auth.ts       # OAuth token 管理（safeStorage 解密 + 刷新）
+    └── signer.ts     # RSA_PKCS1 + AES 签名（逆向自 asar）
 
 scripts/
-├── qwenwork/capture-key.ts  # 验证 token + 刷新链 + 备份 QWEN_KEYS
-└── wukong/
-    ├── capture-key.ts       # mitmproxy 抓 DEAP key
-    └── cap_deap.py          # mitmproxy addon
+└── qwenwork/capture-key.ts  # 验证 token + 刷新链 + 备份 QWEN_KEYS
 
 docs/
 ├── PRD.md
 ├── ARCHITECTURE.md
 ├── DECISIONS.md
 ├── reverse/
-│   ├── QWENWORKCN_REVERSE.md
-│   └── WUKONG_REVERSE.md
+│   └── QWENWORKCN_REVERSE.md
 └── specs/
     ├── qwenwork-forward.md
     ├── qwenwork-signing.md
     ├── qwenwork-token.md
-    ├── wukong-forward.md
-    ├── capture-key-wukong.md
     ├── capture-key-qwenwork.md
     ├── config-channel.md
-    ├── port-release.md
-    └── key-pool.md
+    └── port-release.md
 ```
 
 ## 开发约定
 
 - **包管理器：pnpm**（不是 npm — npm 会触发 arborist `Link.matches` 崩溃 bug，详见 MEMORY）
 - **dev 模式：tsx**（已去掉 watch — 文件变更需手动重启）
-- 通道选择：`--use wukong` 走 wukong，不加参数默认 qwenwork
-- 新增通道参照 `src/channel.ts` 的模式，加一个 channel 目录 + client.ts
+- **HTTP 框架：Hono**（不是 Express — V24 契约要求）
 
 ## 构建与运行
 
 ```bash
 pnpm install              # 安装依赖（再次强调：不要用 npm）
-pnpm serve                # qwenwork 通道（tsx，无 watch）
-pnpm serve:wukong         # wukong 通道（tsx，无 watch）
-pnpm capture-key          # qwenwork token 验证 + 备份
-pnpm capture-key:wukong   # wukong 密钥抓取
+pnpm serve                # 启动插件网关
+pnpm login                # 弹出登录流程（验证 token + 刷新链）
+pnpm capture-key          # 同上（别名）
 ```
 
 ## 已知限制（不要尝试修复）
 
 | 现状 | 为什么不要修 |
 |------|-------------|
-| 密钥过期（~29天 wukong / ~1h qwenwork access token） | 网关设计，重跑 capture-key / 自动刷新即可 |
-| 第三方模型偶发 550 | DEAP 动态渠道池问题，xrl-router 自动重试 |
+| 密钥过期（~1h qwenwork access token） | 网关设计，自动刷新即可 |
 | 无测试 | 当前阶段不需要，插件是纯翻译层 |
 | qwenwork Windows 解密依赖 powershell.exe | Windows DPAPI 经 PowerShell `System.Security` 调用，Windows 自带无需安装；macOS 走 Keychain |
 
 ## 密钥安全边界
 
 - `.env` 永不进 git — `git check-ignore .env` 必须通过喵！
-- 抓包日志含明文密钥：成功则销毁（burned），失败则保留供调试
-- 系统代理必须在抓包结束后恢复（`finally` 块保证）
 - 只从自己登录的实例抓密钥，不要抓别人的
+
+## V24 契约要点
+
+- **register 不带 `keys` 字段** — 带了 Router 直接拒绝断开
+- **不发 `keys_update` 消息** — 发了 Router 直接断开
+- **`provider.kind` 为 `chat_completions`**（不是 `openai`）
+- **心跳为 `{"type": "heartbeat"}`**（不带 timestamp）
+- **register 带 `workdir`**（插件项目根目录，Router 伴生启动 cwd）
+- **Router 发占位凭证** `Authorization: Bearer xrl-router`，插件用自身凭证访问上游
 
 ## 给 AI Agent 的指引
 
@@ -113,11 +101,9 @@ pnpm capture-key:wukong   # wukong 密钥抓取
 2. **「添加密钥轮转逻辑」** → xrl-router 的职责
 3. **「实现本地模型推理」** → 纯桥接插件
 4. **「复用抓到的 JWT / cosy-key」** → anti-replay 会封号
-5. ~~**「写回 auth-v2.dat」**~~ → 已允许（D-8），refresh 后双向同步
 
 ### 允许的任务方向
 
-- 新增网关通道（遵循 `src/channel.ts` 模式）
 - 新增 DEAP / Cosy 业务 header
 - 优化 WebSocket 重连策略
 - 新增模型展示名（`DISPLAY_NAMES`）
