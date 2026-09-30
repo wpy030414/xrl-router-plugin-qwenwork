@@ -176,3 +176,8 @@ legacy body 结构（WASM 输入侧，非 OpenAI 格式）：
   1. 用官方 WASM 作为「预言机」逐项补齐差异（对比 App 真实请求的完整字节）；
   2. 抓取一次 App 真实推理的完整请求（需临时对 worker 做流量观察）；
   3. 跟进 §6 未解点。
+
+---
+
+> **后续研究（2026-10-01）**：worker 运行形态（pid=主进程）、`MessagePort` 通信协议全貌、job token 真实性验证（≡ access token）
+> 与 503 侦查（变体实验 / patch 矩阵）详见 [`qwenwork-1.2.5-worker-deepdive.md`](./qwenwork-1.2.5-worker-deepdive.md)。
