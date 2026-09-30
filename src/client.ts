@@ -10,7 +10,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { settings } from '../config';
+import { settings } from './config';
 import { getToken, refreshDeviceToken } from './auth';
 import { buildSignMaterial, buildAuthHeaders } from './signer';
 

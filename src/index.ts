@@ -15,8 +15,8 @@ import { serve } from '@hono/node-server';
 import { spawn } from 'child_process';
 import { settings } from './config';
 import { PluginClient } from './pluginClient';
-import { forwardChatCompletions } from './qwenwork/client';
-import { initTokenManager } from './qwenwork/auth';
+import { forwardChatCompletions } from './client';
+import { initTokenManager } from './auth';
 
 const PLUGIN_ID = 'plugin-qwenwork';
 

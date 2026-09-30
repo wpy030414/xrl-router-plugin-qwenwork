@@ -15,7 +15,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import dotenv from 'dotenv';
-import { settings } from '../config';
+import { settings } from './config';
 
 export interface QwenUserInfo {
   uid: string;

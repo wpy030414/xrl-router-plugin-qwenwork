@@ -7,7 +7,7 @@
  */
 
 import crypto from 'node:crypto';
-import { settings } from '../config';
+import { settings } from './config';
 import type { QwenTokenState } from './auth';
 
 /** asar 硬编码 RSA 公钥（QwenWorkCN 0.1.3；modulus 头 c0f223…，非 security-guard 内部公钥） */

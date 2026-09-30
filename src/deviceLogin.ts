@@ -17,7 +17,7 @@
 
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
-import { settings } from '../config';
+import { settings } from './config';
 import { readEnvValue, writeEnvValue } from './envStore';
 
 const PKCE_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';

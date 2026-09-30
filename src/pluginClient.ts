@@ -10,7 +10,7 @@
 
 import { WebSocket } from 'ws';
 import { settings } from './config';
-import { displayName as qwenDisplayName } from './qwenwork/client';
+import { displayName as qwenDisplayName } from './client';
 
 const PLUGIN_ID = 'plugin-qwenwork';
 const HEARTBEAT_INTERVAL_MS = 30000;

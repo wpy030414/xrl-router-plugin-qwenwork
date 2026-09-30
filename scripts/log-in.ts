@@ -13,14 +13,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { settings } from '../../src/config';
-import { adoptCredential, forceRefresh } from '../../src/qwenwork/auth';
-import { extractUidFromToken } from '../../src/qwenwork/client';
-import { buildAuthUrl, buildDeviceLoginParams, DeviceFlowError, openInBrowser, pollDeviceFlow } from '../../src/qwenwork/deviceLogin';
-import { assertEnvGitIgnored, writeEnvValue } from '../../src/qwenwork/envStore';
+import { settings } from '../src/config';
+import { adoptCredential, forceRefresh } from '../src/auth';
+import { extractUidFromToken } from '../src/client';
+import { buildAuthUrl, buildDeviceLoginParams, DeviceFlowError, openInBrowser, pollDeviceFlow } from '../src/deviceLogin';
+import { assertEnvGitIgnored, writeEnvValue } from '../src/envStore';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.resolve(__dirname, '../..');
+const REPO_ROOT = path.resolve(__dirname, '../');
 
 const ok = (s: string): void => console.log(`✅ ${s}`);
 const fail = (s: string): void => console.error(`\n❌ ${s}`);

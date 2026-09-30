@@ -13,12 +13,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { settings } from '../../src/config';
-import { getToken, forceRefresh } from '../../src/qwenwork/auth';
-import { writeEnvValue } from '../../src/qwenwork/envStore';
+import { settings } from '../src/config';
+import { getToken, forceRefresh } from '../src/auth';
+import { writeEnvValue } from '../src/envStore';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = path.resolve(__dirname, '../..');
+const REPO_ROOT = path.resolve(__dirname, '../');
 const ENV_PATH = path.join(REPO_ROOT, '.env');
 
 const ok = (s: string): void => console.log(`✅ ${s}`);

@@ -2,8 +2,8 @@
   "name": "xrl-router-plugin-qwenwork",
   "description": "一个「千问办公」模型反向代理服务，需要配合 XRL Router 使用。",
   "scripts": {
-    "log-in": "tsx scripts/qwenwork/login-web.ts",
-    "log-in:app": "tsx scripts/qwenwork/capture-key.ts",
+    "log-in": "tsx scripts/log-in.ts",
+    "log-in:app": "tsx scripts/log-in-app.ts",
     "serve": "tsx src/index.ts"
   },
   "dependencies": {
