@@ -34,7 +34,7 @@ function extractRefreshToken(authHeader: string | undefined): string | null {
 }
 
 /** 从 OAuth access token（JWT）payload 解出 uid（deviceToken/refresh 响应无 user 字段） */
-function extractUidFromToken(token: string): string {
+export function extractUidFromToken(token: string): string {
   try {
     const part = token.split('.')[1] || '';
     const json = JSON.parse(Buffer.from(part.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'));

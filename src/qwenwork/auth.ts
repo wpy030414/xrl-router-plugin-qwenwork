@@ -31,6 +31,8 @@ export interface QwenTokenState {
   user: QwenUserInfo;
   /** access token 过期时间（ms epoch） */
   expiresAt: number;
+  /** refresh token 过期时间（ms epoch，新版 refresh/poll 响应才返回；undefined = 服务端未告知） */
+  refreshTokenExpiresAt?: number;
   /** 原始解密 JSON（写回时保留千问办公字段：loginDeviceId 等） */
   raw?: any;
 }
@@ -158,6 +160,16 @@ export async function refreshDeviceToken(refreshToken: string): Promise<QwenToke
   }
   const expiresAt = typeof j.expires_at === 'string' ? Date.parse(j.expires_at) : Date.now() + 3600_000;
   const user = cached?.user ?? { uid: '' };
+  // 新版 refresh 响应可携带 refresh token 绝对过期时间（缺失则沿用已知值）
+  const rtExpiresAt =
+    (typeof j.refresh_token_expires_at === 'string' && !Number.isNaN(Date.parse(j.refresh_token_expires_at))
+      ? Date.parse(j.refresh_token_expires_at)
+      : typeof j.refresh_token_expires_in === 'number'
+        ? Date.now() + j.refresh_token_expires_in * 1000
+        : undefined) ?? cached?.refreshTokenExpiresAt;
+  if (rtExpiresAt && rtExpiresAt < Date.now() + 24 * 3600_000) {
+    console.warn(`[qwenwork] refresh token 将于 ${new Date(rtExpiresAt).toISOString()} 过期（不足 24h），请重跑 pnpm login`);
+  }
 
   // 写回 auth-v2.dat：让千问办公 App 也拿到新 refresh token，避免轮换互踩
   if (cached?.raw && fs.existsSync(settings.qwenOauthTokenPath)) {
@@ -171,7 +183,7 @@ export async function refreshDeviceToken(refreshToken: string): Promise<QwenToke
     }
   }
   syncEnvRefreshToken(rt);
-  return { token, refreshToken: rt, user, expiresAt, raw: cached?.raw };
+  return { token, refreshToken: rt, user, expiresAt, refreshTokenExpiresAt: rtExpiresAt, raw: cached?.raw };
 }
 
 /** 从 .env 读 QWEN_KEYS（capture-key 备份的 refresh token，可作自举源） */
@@ -299,7 +311,7 @@ export async function getToken(): Promise<QwenTokenState> {
         console.warn(`[qwenwork] QWEN_KEYS 刷新也失败: ${e.message}`);
       }
     }
-    throw new Error('无可用 token 源（所有 refresh token 均已失效，请重开千问办公 App 登录）');
+    throw new Error('无可用 token 源（所有 refresh token 均已失效，请运行 pnpm login 网页登录，或打开千问办公 App 登录）');
   })().finally(() => { refreshing = null; });
 
   return refreshing;
@@ -317,4 +329,13 @@ export async function forceRefresh(): Promise<QwenTokenState> {
   next.user = cur.user;
   cached = next;
   return next;
+}
+
+/**
+ * 采纳外部获取的凭据（网页 device-flow 登录用）：写入内存缓存。
+ * state 无 raw → 后续 refreshDeviceToken 的 auth-v2.dat 写回条件（cached?.raw && exists）天然不成立，
+ * 即网页登录凭据永不写回 App 登录态文件（与 App 链路独立，互不干扰）。
+ */
+export function adoptCredential(state: QwenTokenState): void {
+  cached = state;
 }
