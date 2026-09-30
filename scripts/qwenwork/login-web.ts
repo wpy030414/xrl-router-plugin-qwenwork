@@ -7,7 +7,7 @@
  * 3. 本地每秒轮询 deviceToken/poll → 拿到 {token, refresh_token}
  * 4. adoptCredential + forceRefresh 验证刷新链 → 备份 QWEN_KEYS 到 .env
  *
- * 对应 pnpm login（App 链路的旧抓取工具为 pnpm capture-key / pnpm login:app）。
+ * 对应 pnpm log-in（App 链路的旧抓取工具为 pnpm capture-key / pnpm log-in:app）。
  */
 
 import fs from 'node:fs';
@@ -95,7 +95,7 @@ export async function main(): Promise<void> {
     }
   }
   if (!verified) {
-    console.warn('⚠️ 刷新链未验证通过 —— 已备份登录返回的原始 refresh token；若 serve 报 401 请重跑 pnpm login');
+    console.warn('⚠️ 刷新链未验证通过 —— 已备份登录返回的原始 refresh token；若 serve 报 401 请重跑 pnpm log-in');
   }
 
   // 4. 备份 QWEN_KEYS（轮换后的值；未验证成功则回退原始值）
@@ -113,7 +113,7 @@ export async function main(): Promise<void> {
   console.log('\n🎉 完成！pnpm serve 即可使用（无需千问办公 App）。');
 }
 
-// 直接运行（pnpm login）时执行
+// 直接运行（pnpm log-in）时执行
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   main().catch((e) => { fail(`未捕获异常：${e.message}`); process.exit(1); });
 }

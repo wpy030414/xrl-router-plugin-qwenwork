@@ -168,7 +168,7 @@ export async function refreshDeviceToken(refreshToken: string): Promise<QwenToke
         ? Date.now() + j.refresh_token_expires_in * 1000
         : undefined) ?? cached?.refreshTokenExpiresAt;
   if (rtExpiresAt && rtExpiresAt < Date.now() + 24 * 3600_000) {
-    console.warn(`[qwenwork] refresh token 将于 ${new Date(rtExpiresAt).toISOString()} 过期（不足 24h），请重跑 pnpm login`);
+    console.warn(`[qwenwork] refresh token 将于 ${new Date(rtExpiresAt).toISOString()} 过期（不足 24h），请重跑 pnpm log-in`);
   }
 
   // 写回 auth-v2.dat：让千问办公 App 也拿到新 refresh token，避免轮换互踩
@@ -311,7 +311,7 @@ export async function getToken(): Promise<QwenTokenState> {
         console.warn(`[qwenwork] QWEN_KEYS 刷新也失败: ${e.message}`);
       }
     }
-    throw new Error('无可用 token 源（所有 refresh token 均已失效，请运行 pnpm login 网页登录，或打开千问办公 App 登录）');
+    throw new Error('无可用 token 源（所有 refresh token 均已失效，请运行 pnpm log-in 网页登录，或打开千问办公 App 登录）');
   })().finally(() => { refreshing = null; });
 
   return refreshing;

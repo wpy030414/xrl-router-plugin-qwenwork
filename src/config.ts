@@ -80,7 +80,7 @@ export const settings: Settings = {
   qwenKeychainAccount: env('QWEN_KEYCHAIN_ACCOUNT', 'QwenWorkCN Key'),         // 仅 macOS 使用
   qwenDeviceRefreshPath: env('QWEN_DEVICE_REFRESH_PATH', '/api/v1/deviceToken/refresh'),
   qwenDevicePollPath: env('QWEN_DEVICE_POLL_PATH', '/api/v1/deviceToken/poll'),
-  qwenAuthBase: env('QWEN_AUTH_BASE', 'https://qwenwork.cn'),
+  qwenAuthBase: env('QWEN_AUTH_BASE', 'https://gateway.qwenwork.cn'),
   qwenClientId: env('QWEN_CLIENT_ID', 'e883ade2-e6e3-4d6d-adf7-f92ceff5fdcb'),
   qwenLoginTimeoutMs: parseInt(env('QWEN_LOGIN_TIMEOUT_MS', '300000'), 10),
   qwenMachineId: env('QWEN_MACHINE_ID', ''),

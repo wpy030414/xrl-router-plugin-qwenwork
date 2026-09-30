@@ -2,8 +2,10 @@
  * qwenwork/deviceLogin.ts — 网页 device-flow 登录（无千问办公 App 的凭据自举）。
  *
  * 来源：对 QwenWorkCN 1.2.5（win）app.asar 的逆向 + 2026-09-30 在线探活：
- * - 登录页：{qwenAuthBase}/device/selectAccounts?challenge&challenge_method=S256&nonce&machine_id&client_id&redirect_uri
- *   用户在浏览器完成钉钉扫码，完成态登记在服务端 —— 无需本地回调监听
+ * - 登录入口：{qwenAuthBase}/device/selectAccounts?challenge&challenge_method=S256&nonce&machine_id&client_id&redirect_uri
+ *   （挂在 gateway 上）→ 302 到 qwenwork.cn/oauth2/auth（Ory Hydra 授权页，client_id=qwenwork-desktop-app，
+ *   我们传的 challenge/nonce 被服务端绑定进 state）→ 用户钉钉扫码 → 回跳 gateway /oauth/callback
+ *   → 服务端兑换 code，凭据与我们的 nonce/challenge 绑定 —— 无需本地回调监听
  *   （redirect_uri=qwenwork-cn:// 是 App 深链回跳参数，对纯网页登录无意义）
  * - 轮询：GET {qwenBaseUrl}/api/v1/deviceToken/poll?nonce&verifier&challenge_method=S256
  *   · 404 或 400{errorCode:INVALID_DEVICE_FLOW} = 进行中，继续轮询（探活实证未知 nonce → 400）
@@ -109,13 +111,19 @@ export function buildAuthUrl(h: DeviceLoginHandles, loginHint?: string): string 
 /** 尽力打开系统浏览器（best-effort：失败返回 false，调用方应同时打印 URL 兜底） */
 export function openInBrowser(url: string): boolean {
   try {
-    const cmd =
-      process.platform === 'win32'
-        ? spawn('cmd.exe', ['/c', 'start', '', url], { detached: true, stdio: 'ignore' })
-        : process.platform === 'darwin'
-          ? spawn('open', [url], { detached: true, stdio: 'ignore' })
-          : spawn('xdg-open', [url], { detached: true, stdio: 'ignore' });
-    cmd.unref();
+    let child;
+    if (process.platform === 'win32') {
+      // cmd 的 start 中 & 是命令分隔符，URL 必须显式加引号且禁用 Node 的自动转义，
+      // 否则 URL 会在第一个 & 处被截断（实测：query 只剩 challenge= 段）
+      child = spawn('cmd.exe', ['/c', 'start', '', `"${url}"`], {
+        detached: true, stdio: 'ignore', windowsVerbatimArguments: true,
+      });
+    } else if (process.platform === 'darwin') {
+      child = spawn('open', [url], { detached: true, stdio: 'ignore' });
+    } else {
+      child = spawn('xdg-open', [url], { detached: true, stdio: 'ignore' });
+    }
+    child.unref();
     return true;
   } catch {
     return false;
@@ -208,7 +216,7 @@ export async function pollDeviceFlow(
     lastStatus === 400 || lastStatus === 404
       ? '（全程未检测到登录完成——请确认浏览器已打开登录页并完成扫码）'
       : '';
-  throw new DeviceFlowError(`${Math.round(timeoutMs / 1000)} 秒内未完成登录，可重跑 pnpm login${hint}`, lastStatus);
+  throw new DeviceFlowError(`${Math.round(timeoutMs / 1000)} 秒内未完成登录，可重跑 pnpm log-in${hint}`, lastStatus);
 }
 
 /** 组合流：生成参数 → 回调 authUrl（打印/开浏览器）→ 轮询 */

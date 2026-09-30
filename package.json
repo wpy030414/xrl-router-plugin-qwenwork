@@ -1,11 +1,9 @@
 {
-  "version": "0.1.0",
   "name": "xrl-router-plugin-qwenwork",
-  "description": "xrl-router qwenwork 插件：gateway.qwenwork.cn → 智谱 GLM / Qwen3.7-plus / DeepSeek-V4-flash / Qwen3.8-max，包装为 OpenAI 兼容本地服务",
+  "description": "一个「千问办公」模型反向代理服务，需要配合 XRL Router 使用。",
   "scripts": {
-    "login": "tsx scripts/qwenwork/login-web.ts",
-    "login:app": "tsx scripts/qwenwork/capture-key.ts",
-    "capture-key": "tsx scripts/qwenwork/capture-key.ts",
+    "log-in": "tsx scripts/qwenwork/login-web.ts",
+    "log-in:app": "tsx scripts/qwenwork/capture-key.ts",
     "serve": "tsx src/index.ts"
   },
   "dependencies": {
