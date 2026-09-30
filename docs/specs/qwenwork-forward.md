@@ -19,11 +19,12 @@
 
 1. **Token 来源**：`getToken()` 三源 fallback（内存缓存 → auth-v2.dat → .env QWEN_KEYS）；灾备从 `Authorization` 头取 `ory_rt_` 前缀 refresh token喵
 2. **Token 刷新链路**：`getToken()` 缓存有效（> 5min）→ 直接返回；过期 → 内存 refresh token → `refreshDeviceToken(rt)` 换取 access token + 新 refresh token → 写回 auth-v2.dat + .env → `extractUidFromToken(JWT payload)` 从 JWT 解出 uid
-3. **模型默认**：客户端未指定 `model` 时使用 `qwork-advanced`；指定了什么就透传什么（无别名映射）。默认模型列表：`qwork-advanced`、`qwork-auto`、`qwork-lite`、`qmodel_latest`
+3. **模型默认（2026-09 新版）**：客户端未指定 `model` 时使用 `flash`；指定了什么就透传什么（无别名映射）。默认挡位列表：`flash`、`pro`、`qwen3.8-max-preview`（云端权威目录见 `GET /api/v2/model/list`，插件可用 `fetchModelCatalog()` 拉取）
 4. **Body 清洗**：`delete forwardBody.encode`、`delete forwardBody.extra_body`（qwenwork 网关明文即可，不需要 Encode=1）
 5. **自动填充**：`request_id` 和 `session_id` 缺失时用 `randomUUID()` 补全
-6. **Cosy 静态头**：12 个固定头（`Cosy-Business-Product: qoder_work`、`Cosy-Scene: qwork`、`Cosy-Version: 1.0.47` 等；其中 `Login-Version`、`x-model-source` 非 `Cosy-*` 前缀）
-7. **推理路径**：`/algo/api/v2/service/pro/sse/agent_chat_generation?FetchKeys=llm_model_result&AgentId=agent_common`
+6. **Cosy 静态头**：12 个头（`Cosy-Business-Product: qoder_work`、`Cosy-Scene: qwork`、`Cosy-Version: 1.1.59`、`Cosy-MachineOs: ${arch}_${platform}` 按平台生成 等；其中 `Login-Version`、`x-model-source` 非 `Cosy-*` 前缀）
+7. **推理路径**：`/algo/api/v2/service/pro/sse/agent_chat_generation?FetchKeys=llm_model_result&AgentId=agent_common`（2026-09 新版官方客户端另带 `&Encode=1`，body 为 WASM 流加密体——待适配，见「已知边界」）
+8. **挡位头（2026-09 新版）**：挡位经 `x-model-key` 请求头传递（值 = 目录 key，如 `flash`），body.model 不再用于服务端路由
 
 **SSE 双层解包：**
 - 外层格式：`data:{"headers":{...},"body":"<内层 OpenAI chunk JSON>","statusCodeValue":200}`
@@ -49,12 +50,13 @@
 - [ ] 传入非 `ory_rt_` 前缀 token → 401
 - [ ] 流式响应：客户端收到标准 `data: <OpenAI chunk>` + 末尾 `data: [DONE]`
 - [ ] 非流式响应：返回完整 `chat.completion` JSON，`message.content` 为所有 delta 拼接
-- [ ] `model` 字段透传：客户端指定什么就发什么，缺省时默认 `qwork-advanced`
+- [ ] `model` 字段透传：客户端指定什么就发什么，缺省时默认 `flash`
 - [ ] body 中 `encode` / `extra_body` 字段被删除，不透传
 - [ ] 缺失 `request_id` / `session_id` 自动补全 UUID
 
 ## 已知边界
 
+- **2026-09-30 上游大版本更新（App 1.2.5）**：旧四挡下线，新挡位为 `flash`/`pro`/`qwen3.8-max-preview`（`GET /api/v2/model/list` 下发）；推理协议改为 `x-model-key` 请求头 + `Encode=1`（官方 WASM 流加密 body）。**当前推理转发仍为旧明文签名链，会被服务端 503「Model catalog unavailable」拒绝——推理适配未完成**（目录接口已可用）。完整逆向见 [`docs/researches/qwenwork-1.2.5-update.md`](../researches/qwenwork-1.2.5-update.md)
 - 上游 qwenwork 网关自身会发 `[DONE]` 和空 `{}`，流式路径 `emitChunk` 和非流式路径均显式跳过这两类，流式由本服务发出唯一的 `[DONE]` 喵
 - `extractUidFromToken` 容错：JWT payload 中尝试 `sub` → `uid` → `user_id`，都无则返回空字符串
 - 上游非 2xx：直接透传 status code + body 文本（不做二次包装）

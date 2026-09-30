@@ -23,7 +23,7 @@
 | 环境变量 | 字段 | 默认值 |
 |---|---|---|
 | `QWEN_PORT` | `port` | `19067` |
-| `AVAILABLE_MODELS` | `availableModels` | `qwork-advanced,qwork-auto,qwork-lite,qmodel_latest` |
+| `AVAILABLE_MODELS` | `availableModels` | `flash,pro,qwen3.8-max-preview`（2026-09 新挡位；云端目录见 `GET /api/v2/model/list`） |
 | `XRL_ROUTER_URL` | `xrlRouterUrl` | `http://localhost:19068` |
 | `QWEN_KEYS` | （auth.ts 读取） | — |
 | `QWEN_OAUTH_TOKEN_PATH` | `qwenOauthTokenPath` | Windows: `%APPDATA%/QwenWorkCN/auth-v2.dat`；macOS: `~/Library/Application Support/QwenWorkCN/auth-v2.dat` |
