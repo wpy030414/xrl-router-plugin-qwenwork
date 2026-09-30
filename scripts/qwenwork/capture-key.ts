@@ -1,21 +1,21 @@
 #!/usr/bin/env tsx
 /**
- * capture-qwenwork.ts — qwenwork 通道的「抓密钥」。
+ * capture-qwenwork.ts — qwenwork 通道的「抓密钥」（千问办公 App 链路的诊断工具）。
  *
  * qwenwork 无静态密钥，等价物是 auth-v2.dat（safeStorage 加密的 OAuth token）：
  *  1. 解密 auth-v2.dat（Keychain + PBKDF2 + AES）→ 验证登录态
  *  2. 强制刷新（deviceToken/refresh）→ 验证刷新链 + 轮换 refresh token
  *  3. 备份新 refresh token 到 .env 的 QWEN_KEYS（auth-v2.dat 损坏时可作灾备）
  *
- * 对应 pnpm capture-key / pnpm login。
+ * 对应 pnpm capture-key / pnpm login:app（无 App 的网页登录走 pnpm login）。
  */
 
-import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { settings } from '../../src/config';
 import { getToken, forceRefresh } from '../../src/qwenwork/auth';
+import { writeEnvValue } from '../../src/qwenwork/envStore';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '../..');
@@ -24,31 +24,6 @@ const ENV_PATH = path.join(REPO_ROOT, '.env');
 const ok = (s: string): void => console.log(`✅ ${s}`);
 const fail = (s: string): void => console.error(`\n❌ ${s}`);
 const mask = (s: string): string => (s && s.length > 12 ? `${s.slice(0, 12)}…${s.slice(-4)}` : '(无效)');
-
-/** 备份 refresh token 到 .env 的 QWEN_KEYS（不动其他变量） */
-function writeEnvRefreshToken(refreshToken: string): boolean {
-  let ignored = false;
-  try {
-    execSync(`cd "${REPO_ROOT}" && git check-ignore .env`, { stdio: 'ignore' });
-    ignored = true;
-  } catch { /* 未被 git 忽略 */ }
-  if (!ignored) {
-    fail('.env 未被 git 忽略！为防止泄露已中止。请先把 .env 加入 .gitignore');
-    return false;
-  }
-  const lines = fs.existsSync(ENV_PATH) ? fs.readFileSync(ENV_PATH, 'utf8').split('\n') : [];
-  const idx = lines.findIndex((l) => l.startsWith('QWEN_KEYS='));
-
-  if (idx >= 0) {
-    lines[idx] = `QWEN_KEYS=${refreshToken}`;
-  } else {
-    lines.push(`QWEN_KEYS=${refreshToken}`);
-  }
-  const content = lines.filter((l, i) => !(l === '' && i === lines.length - 1)).join('\n').replace(/\n{3,}/g, '\n\n');
-  fs.writeFileSync(ENV_PATH, content + '\n', { mode: 0o600 });
-  fs.chmodSync(ENV_PATH, 0o600);
-  return true;
-}
 
 export async function main(): Promise<void> {
   console.log(`🔑 xrl-router-plugin · qwenwork 通道 token 验证（无需抓包，纯本机解密+刷新）\n`);
@@ -87,8 +62,8 @@ export async function main(): Promise<void> {
   ok(`刷新成功：新 access token ${mask(next.token)}（有效期至 ${new Date(next.expiresAt).toISOString()}）`);
   ok(`新 refresh token（已轮换）：${mask(next.refreshToken)}`);
 
-  // 4. 备份 refresh token 到 QWEN_KEYS
-  if (writeEnvRefreshToken(next.refreshToken)) {
+  // 4. 备份 refresh token 到 QWEN_KEYS（envStore：git-ignore 守卫 + 单行 upsert + mode 600）
+  if (writeEnvValue('QWEN_KEYS', next.refreshToken, REPO_ROOT)) {
     ok(`refresh token 已备份到 ${ENV_PATH} 的 QWEN_KEYS（mode 600，git-ignored）`);
   }
 
