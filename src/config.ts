@@ -67,7 +67,7 @@ function resolvePort(): number {
 
 export const settings: Settings = {
   port: resolvePort(),
-  availableModels: (process.env.AVAILABLE_MODELS || 'qwork-advanced,qwork-auto,qwork-lite,qmodel_latest')
+  availableModels: (process.env.AVAILABLE_MODELS || 'flash,pro,qwen3.8-max-preview')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean),

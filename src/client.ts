@@ -14,16 +14,65 @@ import { settings } from './config';
 import { getToken, refreshDeviceToken } from './auth';
 import { buildSignMaterial, buildAuthHeaders } from './signer';
 
-/** qwenwork 应用层模型 → 展示名（注册时给 xrl-router 展示用） */
+/**
+ * qwenwork 应用层挡位 → 展示名（注册时给 xrl-router 展示用）。
+ * 2026-09 新版（App 1.2.5）：挡位名即模型名，展示名取目录 display_name 英文值。
+ */
 const DISPLAY_NAMES: Record<string, string> = {
-  'qwork-advanced': 'glm-5.2',
-  'qwork-auto': 'qwen3.7-plus',
-  'qwork-lite': 'deepseek-v4-flash',
-  'qmodel_latest': 'qwen3.8-max',
+  'flash': 'Standard',
+  'pro': 'Pro',
+  'qwen3.8-max-preview': 'Qwen3.8-Max',
 };
 
 export function displayName(modelId: string): string {
   return DISPLAY_NAMES[modelId] || modelId;
+}
+
+/** 云端挡位目录条目（qwork 场景，2026-09 新版 `/api/v2/model/list`） */
+export interface QwenCatalogModel {
+  key: string;
+  displayName: string;
+  displayNameEn?: string;
+  priceFactor?: number;
+  isDefault?: boolean;
+  isNew?: boolean;
+  maxInputTokens?: number;
+}
+
+/**
+ * 拉取云端挡位目录（`GET /api/v2/model/list?Encode=1`）。
+ * 目录响应为明文 JSON（按 scene 分组），提取 qwork 场景下启用的挡位喵。
+ */
+export async function fetchModelCatalog(): Promise<QwenCatalogModel[]> {
+  const token = await getToken();
+  const material = buildSignMaterial(token);
+  const url = `${settings.qwenBaseUrl}/api/v2/model/list?Encode=1`;
+  const auth = buildAuthHeaders(material, { url, body: '' });
+  const res = await fetch(url, {
+    method: 'GET',
+    headers: {
+      ...COSY_STATIC_HEADERS,
+      'Accept': 'application/json',
+      'Authorization': auth.authorization,
+      'Cosy-Key': auth.cosyKey,
+      'Cosy-Date': auth.cosyDate,
+      'Cosy-User': auth.cosyUser,
+    },
+  });
+  if (!res.ok) throw new Error(`qwenwork 模型目录拉取失败：HTTP ${res.status}`);
+  const data: any = await res.json();
+  const list: any[] = Array.isArray(data?.qwork) ? data.qwork : [];
+  return list
+    .filter((m) => m && typeof m.key === 'string' && m.enable !== false)
+    .map((m) => ({
+      key: m.key,
+      displayName: m.display_name ?? m.key,
+      displayNameEn: m.i18n?.display_name?.en,
+      priceFactor: typeof m.price_factor === 'number' ? m.price_factor : undefined,
+      isDefault: m.is_default === true,
+      isNew: m.is_new === true,
+      maxInputTokens: typeof m.max_input_tokens === 'number' ? m.max_input_tokens : undefined,
+    }));
 }
 
 /** 从 Authorization 头取出 refresh token（xrl-router 密钥池 QWEN_KEYS 的透传） */
@@ -42,6 +91,9 @@ export function extractUidFromToken(token: string): string {
   } catch { return ''; }
 }
 
+/** 当前平台标识（对齐官方客户端格式：`${arch}_${platform}`，如 `x86_64_win32`） */
+const MACHINE_OS = `${process.arch === 'arm64' ? 'aarch64' : process.arch === 'x64' ? 'x86_64' : process.arch}_${process.platform}`;
+
 const COSY_STATIC_HEADERS: Record<string, string> = {
   'Cosy-Business-Product': 'qoder_work',
   'Cosy-Business-Type': 'agent',
@@ -51,8 +103,8 @@ const COSY_STATIC_HEADERS: Record<string, string> = {
   'Cosy-MachineToken': 'unknown',
   'Cosy-MachineType': '5',
   'Cosy-Scene': 'qwork',
-  'Cosy-MachineOs': 'aarch64_darwin',
-  'Cosy-Version': '1.0.47',
+  'Cosy-MachineOs': MACHINE_OS,
+  'Cosy-Version': '1.1.59',
   'Login-Version': 'v2',
   'x-model-source': 'system',
 };
@@ -74,7 +126,10 @@ export async function forwardChatCompletions(
   res: any,
   authHeader?: string,
 ): Promise<void> {
-  const model = body.model || 'qwork-advanced';
+  // 2026-09 新版挡位（见 /api/v2/model/list）：flash（标准）/ pro（高级）/ qwen3.8-max-preview，默认 flash喵
+  // TODO(推理适配)：新版要求 `Encode=1`（body 由官方 WASM 生成签名与流加密），当前明文签名链会被
+  // 服务端以 503「Model catalog unavailable」拒绝；待新版 WASM 签名链逆向完成后补齐，目录接口已可用。
+  const model = body.model || 'flash';
   const isStream = body.stream === true;
 
   // 客户端断开时取消上游请求，避免无谓消耗 + 写已关闭的 res
@@ -137,7 +192,7 @@ export async function forwardChatCompletions(
     'Cosy-Key': auth.cosyKey,
     'Cosy-Date': auth.cosyDate,
     'Cosy-User': auth.cosyUser,
-    'x-model-key': model,
+    'x-model-key': model, // 2026-09 新版：服务端从此头读取挡位（值 = 目录 key，如 flash/pro/qwen3.8-max-preview）
   };
 
   try {
