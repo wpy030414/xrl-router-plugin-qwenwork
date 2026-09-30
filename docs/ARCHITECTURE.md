@@ -1,6 +1,6 @@
 # ARCHITECTURE.md — xrl-router-plugin-qwenwork 架构地图
 
-> Version: 0.3.0 | Last updated: 2026-09-22
+> Version: 0.5.0 | Last updated: 2026-09-30
 >
 > 本文档描述稳定的结构关系，半年至一年不变。代码改动若偏离此处描述，需同步更新。
 
@@ -46,10 +46,11 @@ src/
 ├── index.ts              # Hono 入口：路由 + 端口释放 + 优雅退出
 ├── config.ts             # 配置单例：env 读取
 ├── pluginClient.ts       # WebSocket 客户端：V24 注册（无 keys）/ 心跳 / 重连
-└── qwenwork/
-    ├── client.ts         # qwenwork 通道转发：签名 + SSE 解包 + tool_calls 标准化
-    ├── auth.ts           # token 管理：safeStorage 解密/加密（Keychain/DPAPI）/ refresh / 文件监听 / 三源 fallback
-    └── signer.ts         # 请求签名：AES-128-CBC + RSA_PKCS1 + MD5
+├── client.ts             # qwenwork 通道转发：签名 + SSE 解包 + tool_calls 标准化
+├── auth.ts               # token 管理：safeStorage 解密/加密（Keychain/DPAPI）/ refresh / 文件监听 / 三源 fallback / adoptCredential
+├── deviceLogin.ts        # 网页 device-flow 登录：PKCE + selectAccounts URL + deviceToken/poll 轮询
+├── envStore.ts           # .env 安全读写单点：git-ignore 守卫 + 单行 upsert + mode 600
+└── signer.ts             # 请求签名：AES-128-CBC + RSA_PKCS1 + MD5
 ```
 
 ### 依赖图
@@ -58,11 +59,13 @@ src/
 index.ts (Hono)
 ├── config.ts
 ├── pluginClient.ts ← config.ts
-│   └── qwenwork/client.ts (displayName)
-├── qwenwork/client.ts ← config.ts, qwenwork/auth.ts, qwenwork/signer.ts
+│   └── client.ts (displayName)
+├── client.ts ← config.ts, auth.ts, signer.ts
 │   ├── auth.ts ← config.ts
 │   └── signer.ts ← config.ts, auth.ts (types)
-└── qwenwork/auth.ts ← config.ts
+├── auth.ts ← config.ts
+└── deviceLogin.ts ← config.ts, envStore.ts
+    └── envStore.ts（无内部依赖；log-in.ts 脚本额外引 auth/client/deviceLogin/envStore）
 ```
 
 ---
@@ -78,7 +81,7 @@ index.ts (Hono)
 | 分组 | 字段 | 说明 |
 |------|------|------|
 | 通用 | `port`, `availableModels` | 监听端口（默认 19067）、可用模型列表 |
-| qwenwork | `qwenBaseUrl`, `qwenOauthTokenPath`, `qwenUserDataDir`, `qwenKeychainService`, `qwenKeychainAccount`, `qwenDeviceRefreshPath`, `qwenRsaPublicKeyPath`, `qwenRefreshIntervalMs`, `qwenTarget` | 推理网关地址 + OAuth/签名参数 |
+| qwenwork | `qwenBaseUrl`, `qwenOauthTokenPath`, `qwenUserDataDir`, `qwenKeychainService`, `qwenKeychainAccount`, `qwenDeviceRefreshPath`, `qwenDevicePollPath`, `qwenAuthBase`, `qwenClientId`, `qwenLoginTimeoutMs`, `qwenMachineId`, `qwenRsaPublicKeyPath`, `qwenRefreshIntervalMs`, `qwenTarget` | 推理网关地址 + OAuth/签名/网页登录参数 |
 | xrl-router | `xrlRouterUrl` | WS 连接地址 |
 
 ### 3.2 pluginClient.ts — WS 客户端（V24 契约）
@@ -122,7 +125,7 @@ index.ts (Hono)
 
 指数退避：`delay = min(1000ms * 2^attempts, 60000ms)`。每次 `open` 事件重置 `reconnectAttempts = 0`。
 
-### 3.3 qwenwork/client.ts — 签名转发
+### 3.3 client.ts — 签名转发
 
 `forwardChatCompletions(body, res, authHeader)` 处理流程：
 
@@ -162,7 +165,7 @@ index.ts (Hono)
 
 **非流式聚合**：读取所有 SSE chunk，拼接 `choices[0].delta` 的 `content` / `reasoning_content`（空值时字段不存在），`tool_calls` 按 `index` 分组拼接 `arguments`。
 
-### 3.4 qwenwork/auth.ts — token 管理
+### 3.4 auth.ts — token 管理
 
 #### decryptAuthFile — safeStorage 解密（按平台分派）
 
@@ -202,7 +205,7 @@ macOS（Keychain + PBKDF2 + AES-128-CBC）与 Windows（Local State 取 key → 
   throw Error
 ```
 
-### 3.5 qwenwork/signer.ts — 请求签名
+### 3.5 signer.ts — 请求签名
 
 #### buildSignMaterial — encryptUserInfo 等价物
 
@@ -252,6 +255,36 @@ Authorization = "Bearer COSY." + o + "." + sig
 #### 优雅退出
 
 `SIGTERM` / `SIGINT` → `pluginClient.close()` → `process.exit(0)`。`close()` 清理心跳定时器、重连定时器、WS 连接。
+
+### 3.7 deviceLogin.ts — 网页 device-flow 登录
+
+```
+buildDeviceLoginParams()   # PKCE(S256) + nonce(UUID) + machineId(env > .env > 生成持久化)
+        ▼
+buildAuthUrl()             # https://gateway.qwenwork.cn/device/selectAccounts?challenge&nonce&machine_id&client_id&redirect_uri
+                           #   → 302 qwenwork.cn/oauth2/auth（Hydra 授权页，扫码）→ 回跳 gateway /oauth/callback
+        ▼
+openInBrowser()            # win: cmd /c start | mac: open | linux: xdg-open（best-effort）
+        ▼
+pollDeviceFlow()           # GET {qwenBaseUrl}/api/v1/deviceToken/poll?nonce&verifier&challenge_method=S256
+  · 404 / 400(INVALID_DEVICE_FLOW) = 进行中，1s 间隔继续
+  · 总超时 QWEN_LOGIN_TIMEOUT_MS（300s）；连续网络错误 ≥5 次中止
+  · 成功前校验 nonce + code_challenge + method 三连绑定（防串号）
+        ▼
+DeviceFlowCredential { token, refreshToken, expiresAt, refreshTokenExpiresAt? }
+```
+
+协议来源：QwenWorkCN 1.2.5 app.asar 逆向 + 2026-09-30 在线探活，详见 [specs/qwenwork-device-login.md](specs/qwenwork-device-login.md)。消费入口为 `scripts/log-in.ts`（`pnpm log-in`）。
+
+### 3.8 envStore.ts — .env 安全读写单点
+
+| 函数 | 说明 |
+|------|------|
+| `assertEnvGitIgnored(root?)` | `git check-ignore .env` 守卫，所有写入的前置条件 |
+| `readEnvValue(key, root?)` | 读单键（缺失/空 → null），dotenv.parse |
+| `writeEnvValue(key, value, root?)` | 单行 upsert（保留其他行）+ mode 600 + chmod |
+
+消费方：`QWEN_KEYS`（refresh token 备份/自举）、`QWEN_MACHINE_ID`（设备标识）。log-in 与 log-in-app 两脚本共用。
 
 ---
 
@@ -327,10 +360,17 @@ Router 对插件上游请求恒发占位值：`Authorization: Bearer xrl-router`
 | `QWEN_KEYCHAIN_SERVICE` | `QwenWorkCN Safe Storage` | macOS Keychain service 名 |
 | `QWEN_KEYCHAIN_ACCOUNT` | `QwenWorkCN Key` | macOS Keychain account 名 |
 | `QWEN_DEVICE_REFRESH_PATH` | `/api/v1/deviceToken/refresh` | token 刷新接口 |
+| `QWEN_DEVICE_POLL_PATH` | `/api/v1/deviceToken/poll` | 网页登录轮询接口（host 同 `QWEN_BASE_URL`） |
+| `QWEN_AUTH_BASE` | `https://gateway.qwenwork.cn` | device-flow 登录入口 origin（`/device/selectAccounts`） |
+| `QWEN_CLIENT_ID` | `e883ade2-e6e3-4d6d-adf7-f92ceff5fdcb` | device-flow OAuth client_id（asar 常量） |
+| `QWEN_LOGIN_TIMEOUT_MS` | `300000` | 网页登录轮询总超时 |
+| `QWEN_MACHINE_ID` | *(空，自动生成持久化到 .env)* | device-flow 设备标识显式覆盖 |
+| `QWEN_USER_DATA_DIR` | `%APPDATA%/QwenWorkCN` 等 | Electron userData 目录（Windows 读 Local State 的 os_crypt 密钥） |
 | `QWEN_RSA_PUBLIC_KEY_PATH` | *(空，用内嵌公钥)* | RSA 公钥 PEM 文件路径（可选覆盖） |
 | `QWEN_REFRESH_INTERVAL_MS` | `600000` | token 自动刷新检查间隔（10min） |
 | `QWEN_TARGET` | `c` | deviceToken/refresh 的 target 参数 |
-| `QWEN_KEYS` | *(空)* | 灾备 refresh token（逗号分隔） |
+| `QWEN_KEYS` | *(空)* | 灾备 refresh token（`pnpm log-in` / `pnpm log-in:app` 备份的当前值） |
+| `QWEN_MACHINE_ID`（.env 行） | 自动生成 | device-flow 设备标识（`pnpm log-in` 首跑写入） |
 
 ### 日志格式
 
@@ -352,7 +392,7 @@ Router 对插件上游请求恒发占位值：`Authorization: Bearer xrl-router`
 
 - 原因：OAuth token 已失效或刷新失败
 - 排查：确认 `auth-v2.dat` 存在且千问办公 App 已登录；或 `.env QWEN_KEYS` 有值
-- 修复：重新运行 `pnpm login` 验证刷新链，或重开千问办公 App 触发文件更新
+- 修复：重新运行 `pnpm log-in`（网页扫码登录，无需 App）；装有 App 时也可运行 `pnpm log-in:app` 诊断 App 链路
 
 ### 550 / 上游错误
 

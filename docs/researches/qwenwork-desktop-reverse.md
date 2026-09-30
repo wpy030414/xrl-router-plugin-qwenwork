@@ -1,10 +1,10 @@
-# 千问办公（QwenWorkCN）逆向分析
+# 千问办公桌面 App 逆向分析（QwenWorkCN Desktop，safeStorage/Cosy/签名）
 
 > **状态**：✅ **完全离线独立调用已实现**（自造 authorization/cosy-key + 明文 body，验证 200 + glm-5.2 推理成功）
 > **最后更新**：2026-08-02
 > **目标应用**：`QwenWorkCN.app` v0.1.3（BundleID `cn.qwenwork.desktop.mac`）
-
-本文档是 `wukong-penetrate`（钉钉悟空 DEAP 逆向）的姊妹篇，记录对钉钉新品「千问办公」的逆向成果。
+>
+> **姊妹篇**：[qwenwork-web-login-research.md](./qwenwork-web-login-research.md) — Web device-flow 登录（2026-09-30，无需 App 的凭据自举）
 
 ---
 
@@ -478,7 +478,7 @@ POST https://gateway.qwenwork.cn/api/v1/deviceToken/refresh
 - ~~`cosy-key` 未破~~ → **已破解**（§6.8）：`cosy-key` = `base64(RSA_PKCS1(asar 硬编码公钥, random 16B AES key))`，完全离线独立生成
 - ~~推理请求无法脱离千问办公独立复用~~ → **已实现完全离线独立调用**（§6.8 验证 HTTP 200 + glm-5.2 推理成功）
 - COSY JWT 动态短期 → access token ~1h 有效，但已通过 `deviceToken/refresh` + safeStorage 解密实现自动刷新链（§6.9）
-- `qoderclicn` wasm 签名逻辑**已被纯 Node.js 实现替代**（`src/qwenwork/signer.ts`），无需调用 wasm
+- `qoderclicn` wasm 签名逻辑**已被纯 Node.js 实现替代**（`src/signer.ts`），无需调用 wasm
 - 账户层 `x-sign`/`x-umt`/`x-mini-wua`（SecurityGuard）：推理层**不校验**这些头，仅 Cosy 签名即可通过网关鉴权
 
 ---

@@ -5,9 +5,9 @@
 | 字段 | 内容 |
 |------|------|
 | 产品名称 | xrl-router-plugin-qwenwork |
-| 版本 | 0.3.0 |
-| 状态 | V24 契约迁移完成 |
-| 最后更新 | 2026-09-22 |
+| 版本 | 0.5.0 |
+| 状态 | V24 契约稳定运行 |
+| 最后更新 | 2026-09-30 |
 
 ---
 
@@ -71,17 +71,18 @@
 - 三源回退：内存缓存 → `auth-v2.dat`（macOS Keychain / Windows DPAPI 解密）→ `.env QWEN_KEYS`（自举）
 - 单飞防并发（同一时刻只有一个刷新请求）
 
-### US-3：离线独立调用验证
+### US-3：凭据自举
 
-**作为** 逆向工程师，
-**我希望** 运行 `pnpm capture-key` 验证 token 解密和刷新链路，
-**以便** 确认离线独立调用的可行性喵～
+**作为** 逆向工程师 / 普通用户，
+**我希望** 不安装千问办公 App 也能获取首份凭据并验证刷新链路，
+**以便** 在任意机器上「拷项目 → 扫码 → serve」完成部署喵～
 
 **验收标准：**
-- 解密 `auth-v2.dat`（macOS Keychain → PBKDF2 → AES-128-CBC；Windows Local State DPAPI 密钥 → AES-256-GCM）
-- 强制刷新 token（验证刷新链 + refresh token 轮换）
-- 备份新 refresh token 到 `.env QWEN_KEYS`（mode 600）
-- 全程不依赖千问办公 App 运行（仅需 `auth-v2.dat` 文件存在）
+- `pnpm log-in`：网页 device-flow 登录（浏览器 selectAccounts 扫码 + `deviceToken/poll` 轮询），全程无需 App 与本地回调
+- 轮询成功前校验 nonce + code_challenge 绑定；凭据备份到 `.env QWEN_KEYS`（mode 600，git-ignore 守卫）
+- 跟踪 `refresh_token_expires_at`，距过期 <24h 告警提示重登
+- `pnpm log-in:app`（App 链路，可选）：解密 `auth-v2.dat`（macOS Keychain / Windows DPAPI）+ 强制刷新 + 备份
+- 全程不依赖千问办公 App 运行（装有 App 时两条链路独立共存）
 
 ### US-4：故障自动恢复（WebSocket 重连）
 
@@ -97,7 +98,25 @@
 
 ---
 
-## 4. 功能需求
+## 功能及其意义
+| 功能 | 解决什么 | 为什么需要 |
+|------|----------|------------|
+| Cosy 签名桥接 | 千问办公网关的 RSA+AES+MD5 签名协议壁垒 | 普通 OpenAI 客户端无法自行签名 |
+| SSE 双层解包 | 上游返回外层包裹的 SSE 格式 | 客户端需要标准 OpenAI SSE |
+| Token 自动刷新 | OAuth access token ~1h 过期 | 避免服务频繁中断 |
+| WebSocket 注册/心跳/重连 | 插件发现与保活 | xrl-router 需要感知插件存活 |
+| 网页 device-flow 登录（`pnpm log-in`） | 首份凭据获取需依赖千问办公 App | 实现「拷项目→扫码→serve」零 App 部署 |
+| 端口释放 | 重启时 EADDRINUSE | 开发体验 |
+
+## 功能之间的关系
+- Cosy 签名桥接依赖 Token 自动刷新（每个请求需有效 OAuth token 参与签名）
+- 网页 device-flow 登录为 Token 自动刷新提供首份 refresh token（自举源）
+- WebSocket 注册/心跳/重连保障插件在 xrl-router 中可见，是所有转发流量的前置条件
+- SSE 双层解包与非流式聚合共同覆盖 OpenAI Chat Completions 的全部响应模式
+
+## 范围与非目标
+- 范围内：OpenAI Chat Completions 协议桥接、Cosy 签名、OAuth token 管理、WebSocket 插件协议（V24）、网页 device-flow 登录、端口释放
+- 范围外：Anthropic Messages API、密钥轮转/重试逻辑、本地模型推理、`/v1/models` 端点、非 Chat Completions 端点、tools/tool_use 翻译
 
 ### 4.1 核心功能（P0）
 
@@ -112,7 +131,7 @@
 
 | 编号 | 功能 | 描述 |
 |------|------|------|
-| F-5 | Token 验证与刷新 | `pnpm login` / `pnpm capture-key`：解密 `auth-v2.dat` + 强制刷新 + 备份 `QWEN_KEYS`，验证离线独立调用链路 |
+| F-5 | 凭据获取与刷新 | `pnpm log-in`：网页 device-flow 扫码登录（无需 App）+ 验证刷新链 + 备份 `QWEN_KEYS`；`pnpm log-in:app`：App 链路（auth-v2.dat 解密）诊断 |
 
 ### 4.3 辅助功能（P2）
 
@@ -168,7 +187,7 @@
 |------|------|------|
 | xrl-router | 上游路由层 | 必须运行在 `http://localhost:19068` |
 | gateway.qwenwork.cn | 后端推理网关 | `https://gateway.qwenwork.cn` |
-| 千问办公 App | token 来源 | 仅需 `auth-v2.dat` 文件（登录后生成） |
+| 千问办公 App | token 来源（可选） | 不再必需：`pnpm log-in` 网页扫码即可自举凭据；App 链路走 `auth-v2.dat` |
 
 ---
 
@@ -185,7 +204,7 @@
 
 ## 8. 验收标准
 
-- [ ] `pnpm login` / `pnpm capture-key` 能解密 `auth-v2.dat` 并验证 token 刷新链
+- [ ] `pnpm log-in` 网页扫码登录成功并备份 `QWEN_KEYS`（无需 App）
 - [ ] `pnpm serve` 启动后 `/health` 返回 `backend: "qwenwork"`
 - [ ] 插件成功连接 xrl-router 并注册（plugin_id: `plugin-qwenwork`，V24 契约无 keys）
 - [ ] 客户端通过 xrl-router 能正常调用 GLM-5.2（流式 + 非流式）
@@ -215,10 +234,10 @@
 
 ```bash
 pnpm install              # 安装依赖
-pnpm login                # 验证 token（需千问办公 App 已登录）
+pnpm log-in                # 网页扫码登录（无需千问办公 App）
 pnpm serve                # 启动插件网关
 ```
 
 ---
 
-*版本 0.3.0 · 最后更新 2026-09-22*
+*版本 0.5.0 · 最后更新 2026-09-30*

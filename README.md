@@ -1,63 +1,38 @@
 # xrl-router-plugin-qwenwork
 
-> xrl-router 双通道插件 — 把钉钉系 AI 网关包装成 OpenAI Chat Completions 兼容的本地服务喵～
+> xrl-router qwenwork 通道插件 — 把千问办公 AI 网关包装成 OpenAI Chat Completions 兼容的本地服务喵～
 
 ```
-客户端 → xrl-router → 本插件（按通道转发）→ 后端网关
-                        ├─ qwenwork（默认）：gateway.qwenwork.cn → 智谱 GLM-5.2
-                        └─ wukong（--use wukong）：api-deap.dingtalk.com → 通义/Claude/GPT
+客户端 → xrl-router → 本插件 → gateway.qwenwork.cn → 智谱 GLM-5.2 / Qwen3.7-plus / DeepSeek-V4-flash / Qwen3.8-max
 ```
 
-## 双通道一览
+## 这是什么？
+- 定位：xrl-router 的 qwenwork 通道插件，纯翻译层
+- 解决的核心问题：把千问办公网关的 Cosy 签名协议桥接为标准 OpenAI Chat Completions API，让 Claude Code / Cursor 等客户端零改动接入
 
-| 通道 | 启动 | 默认端口 | 后端 | 密钥 | 特性 |
-|------|------|------|------|------|------|
-| **qwenwork**（默认）| `pnpm serve` | `19067` | 千问办公 → **智谱 glm-5.2** / Qwen3.7-plus / DeepSeek-V4-flash / Qwen3.8-max | 自动管理：`auth-v2.dat`(safeStorage) + `deviceToken/refresh` 按需刷新 + 文件监听自动拾取 + 双向同步 | 千问 App 后台运行即可，几乎不用重新登录（[逆向成果](./docs/reverse/QWENWORKCN_REVERSE.md)）|
-| **wukong** | `pnpm serve:wukong` | `19066` | 钉钉悟空 DEAP | `WUKONG_KEYS`（`pnpm capture-key:wukong` 抓取）| 注入 DEAP 业务头 + 按行 flush 流式（[逆向成果](./docs/reverse/WUKONG_REVERSE.md)）|
+## 为什么存在？
+- 背景 / 动机：国内 AI 网关（gateway.qwenwork.cn）协议壁垒高（RSA+AES+MD5 签名体系），普通 OpenAI 客户端无法直接调用；xrl-router 是统一 LLM 路由层，通过插件协议扩展对不同后端的支持
 
-两通道默认端口不同（`QWEN_PORT` / `WUKONG_PORT` 可分别覆盖），可以**分别同时启动**，互不干扰喵～
+## 如何安装和运行？
+- 前置要求：Node.js ≥ 20、pnpm、xrl-router 运行在 `http://localhost:19068`；千问办公 App **不再必需**（`pnpm log-in` 网页扫码即可自举凭据）
+- 安装步骤：`pnpm install`
+- 运行 / 启动：`pnpm log-in`（网页扫码获取凭据）→ `pnpm serve`（启动网关）
 
-本插件自身不跑任何模型，全部能力来自远端网关喵～
+## 当前状态
+- 阶段：开发中
+- 已知限制：access token ~1h 过期（自动刷新）、refresh token 有服务端绝对过期时间（<24h 告警提示重登）、无自动化测试
 
-## 前置要求
-
-| 依赖 | 说明 |
-|------|------|
-| **Node.js** ≥ 20 | 运行时 |
-| **pnpm** | 包管理器（不要用 npm） |
-| **xrl-router** | 必须运行在 `http://localhost:19068` |
-| **mitmproxy** | 仅 wukong 抓密钥时需要 |
-| **千问办公 / 悟空 App** | 仅首次抓密钥/token 时需要（macOS Keychain / Windows DPAPI 解密 `auth-v2.dat`） |
-
-## 快速开始
-
-```bash
-pnpm install
-
-# qwenwork 通道（默认）
-# 前置：千问办公 App 已登录（首次需运行 capture-key 验证，之后 serve 自动管理）
-pnpm capture-key    # 验证登录态 + 刷新 token + 备份 QWEN_KEYS（仅首次或诊断时用）
-pnpm serve          # 启动后自动监听 auth-v2.dat，千问 App 后台运行即可
-
-# wukong 通道
-pnpm capture-key:wukong   # mitmproxy 抓 DEAP 密钥
-pnpm serve:wukong
-```
-
-**qwenwork 通道日常使用**：只要千问 App 保持后台运行，`pnpm serve` 会自动续命（按需刷新 + 文件监听自动拾取 + 双向同步），几乎不用重新登录喵～
+## 核心技术
+- 语言 / 框架 / 关键依赖：TypeScript 5 · Hono 4 · ws 8 · tsx 4 · pnpm
+- 签名算法：AES-128-CBC + RSA_PKCS1 + MD5（逆向自 asar）
+- OAuth：deviceToken/refresh 轮换式刷新 + PKCE device-flow 网页登录
 
 ## 验证
 
 ```bash
-curl http://localhost:19067/health   # qwenwork 通道
-# → {"status":"healthy","channel":"qwenwork","backend":"qwenwork","base_url":"https://gateway.qwenwork.cn"}
-curl http://localhost:19066/health   # wukong 通道
-# → {"status":"healthy","channel":"wukong","backend":"deap","base_url":"https://api-deap.dingtalk.com/dingtalk/v1"}
+curl http://localhost:19067/health
+# → {"status":"healthy","backend":"qwenwork","plugin_mode":true,"base_url":"https://gateway.qwenwork.cn"}
 ```
-
-## 技术栈
-
-Node.js 20+ · TypeScript 5 · Express 4 · ws · pnpm 11
 
 ## 延伸阅读
 
@@ -65,6 +40,5 @@ Node.js 20+ · TypeScript 5 · Express 4 · ws · pnpm 11
 - [docs/PRD.md](./docs/PRD.md) — 功能需求与存在的意义
 - [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) — 架构、协议、模块设计
 - [docs/DECISIONS.md](./docs/DECISIONS.md) — 设计决策的历史原因
-- [docs/reverse/QWENWORKCN_REVERSE.md](./docs/reverse/QWENWORKCN_REVERSE.md) — 千问办公逆向分析
-- [docs/reverse/WUKONG_REVERSE.md](./docs/reverse/WUKONG_REVERSE.md) — 钉钉悟空逆向分析
+- [docs/researches/qwenwork-desktop-reverse.md](./docs/researches/qwenwork-desktop-reverse.md) — 千问办公桌面 App 逆向分析
 - [docs/specs/](./docs/specs/) — 核心功能规格文档

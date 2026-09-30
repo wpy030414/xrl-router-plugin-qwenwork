@@ -3,7 +3,7 @@
 > 本文件记录项目关键设计决策背后的**历史原因**，防止架构漂移。
 > 每条决策回答的是「为什么」而非「怎么做」。
 
-版本：0.4.0 | 最后更新：2026-09-22
+版本：0.5.0 | 最后更新：2026-09-30
 
 ---
 
@@ -37,7 +37,7 @@
 - **双向同步**：refresh 后写回 auth-v2.dat，千问 App 下次读取时拿到新 token，不互踩
 - **文件监听**：千问 App 自己刷新时，插件自动拾取新值，只要 App 在后台就几乎不用重新登录
 
-**证据**：`src/qwenwork/auth.ts`（`getToken()` / `startAuthFileWatch()` / `encryptAuthFile()`）、`src/qwenwork/client.ts`（`forwardChatCompletions` 改用 `getToken()`）
+**证据**：`src/auth.ts`（`getToken()` / `startAuthFileWatch()` / `encryptAuthFile()`）、`src/client.ts`（`forwardChatCompletions` 改用 `getToken()`）
 
 ---
 
@@ -63,7 +63,7 @@
 
 **原因**：逆向工程发现 asar 代码中显式使用 PKCS1_PADDING。实验验证：OAEP 返回 `101 Signature invalid`，PKCS1 返回 HTTP 200喵。
 
-**证据**：`src/qwenwork/signer.ts`（`crypto.constants.RSA_PKCS1_PADDING`，注释标注「PKCS1 非 OAEP」）
+**证据**：`src/signer.ts`（`crypto.constants.RSA_PKCS1_PADDING`，注释标注「PKCS1 非 OAEP」）
 
 ---
 
@@ -77,7 +77,7 @@
 - OpenAI 客户端在非流式模式下期望收到完整的 JSON 对象
 - 插件需要聚合 `delta.content` + `delta.reasoning_content` + `delta.tool_calls` 等字段
 
-**证据**：`src/qwenwork/client.ts`（chunk 聚合逻辑）
+**证据**：`src/client.ts`（chunk 聚合逻辑）
 
 ---
 
@@ -99,7 +99,7 @@
 - 插件和千问 App 持有相同的 refresh token，不再轮换互踩
 - 只要 App 保持后台运行，token 链可以持续续命
 
-**证据**：`src/qwenwork/auth.ts`（`encryptAuthFile()`、`refreshDeviceToken()` 写回逻辑）
+**证据**：`src/auth.ts`（`encryptAuthFile()`、`refreshDeviceToken()` 写回逻辑）
 
 ---
 
@@ -118,7 +118,7 @@
 
 **收益**：消除多模型假象，减少用户配置错误；插件注册信息与实际能力一致喵。
 
-**证据**：`src/config.ts`（默认值）、`src/pluginClient.ts`（`tier: 'custom'`）、`src/qwenwork/client.ts`（无 MODEL_ALIASES）
+**证据**：`src/config.ts`（默认值）、`src/pluginClient.ts`（`tier: 'custom'`）、`src/client.ts`（无 MODEL_ALIASES）
 
 ---
 
@@ -134,7 +134,7 @@
 
 **收益**：用户可以通过 xrl-router 选择不同的模型，灵活性更高喵。
 
-**证据**：`src/config.ts`（默认模型列表）、`src/qwenwork/client.ts`（DISPLAY_NAMES）
+**证据**：`src/config.ts`（默认模型列表）、`src/client.ts`（DISPLAY_NAMES）
 
 ---
 
@@ -171,7 +171,7 @@
 - 完全移除 wukong 通道（源码、脚本、文档）
 - `plugin_id` 改为 `plugin-qwenwork`（符合 V24 命名约定）
 - `provider.kind` 改为 `chat_completions`
-- 新增 `login` 脚本（V24 契约要求的生命周期入口）→ 复用 `capture-key.ts`
+- 新增 `log-in` 脚本（网页 device-flow 登录 + App 链路诊断）→ 保留原有 `capture-key` 逻辑
 
 **收益**：
 - 对齐 Router V24 契约，避免 register 被拒绝
